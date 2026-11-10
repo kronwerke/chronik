@@ -1,0 +1,35 @@
+# Builds a tag and attaches the jar to that tag's release. For when the tag build
+# could not, or a release needs its jar again.
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: The tag to build, like v0.3.0
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag }}
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@v4
+      - run: ./gradlew build --no-daemon
+      - name: Attach the jar
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          cd build/libs
+          sha256sum chronik-*.jar > SHA256SUMS
+          gh release upload "$TAG" chronik-*.jar SHA256SUMS --clobber --repo "$GITHUB_REPOSITORY"
