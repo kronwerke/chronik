@@ -44,8 +44,19 @@ public final class Api {
     }
 
     public static void start() {
+        // the launcher gives every server its own port and its token in the environment: the
+        // servers of a network may share one config folder
         int port = ChronikConfig.WEB_PORT.get();
         String token = ChronikConfig.WEB_TOKEN.get();
+        String envPort = System.getenv("CHRONIK_WEB_PORT"), envToken = System.getenv("CHRONIK_WEB_TOKEN");
+        if (envPort != null && !envPort.isBlank() && envToken != null && !envToken.isBlank()) {
+            try {
+                port = Integer.parseInt(envPort.trim());
+                token = envToken.trim();
+            } catch (NumberFormatException e) {
+                Chronik.LOG.warn("CHRONIK_WEB_PORT is not a number: {}", envPort);
+            }
+        }
         if (port <= 0 || token.isBlank()) return;
         try {
             http = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 16);

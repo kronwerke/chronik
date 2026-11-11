@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.2.1
+
+- The web API takes its port and token from `CHRONIK_WEB_PORT` and `CHRONIK_WEB_TOKEN` when both are set (the launcher sets them per server); servers that share a config folder no longer try the same port.
+
 ## 1.2.0
 
 - A rollback compares the block, not its state: a fence, pane or wire that changed shape, a crop that grew, a furnace that lit up or a door that opened is no longer "newer work" and is rolled back. Where the entry left air, water or lava that flowed in since is replaced too. After the job every touched block and its neighbours take their shapes again, so a fence put back connects. (R2-04)
