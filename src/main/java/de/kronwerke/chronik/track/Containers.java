@@ -44,6 +44,8 @@ public final class Containers {
         final BlockPos pos;
         final Map<Key, Integer> delta = new LinkedHashMap<>();
         Map<Key, Integer> before;
+        /** The container and the player's own items at the last look, for moves by mod packets. */
+        Map<Key, Integer> lastC, lastP;
 
         Open(AbstractContainerMenu menu, String world, BlockPos pos) {
             this.menu = menu;
@@ -77,13 +79,64 @@ public final class Containers {
             OPEN.remove(player.getUUID());
             return;
         }
-        OPEN.put(player.getUUID(), new Open(menu, Track.world(player.level()), pos));
+        Open o = new Open(menu, Track.world(player.level()), pos);
+        o.lastC = count(player, menu);
+        o.lastP = own(player, menu);
+        OPEN.put(player.getUUID(), o);
+    }
+
+    /**
+     * Every tick, for open menus: items moved by a mod's own packets (transfer and sort
+     * buttons, inventory sorting mods), which never pass the click handler. Only what went
+     * between the container and the player's own items counts: the container lost what the
+     * player gained, or the other way round. A furnace smelting or a pipe filling the chest
+     * changes only one side and is not the player's doing (review R2-16).
+     */
+    public static void tick(net.minecraft.server.MinecraftServer server) {
+        if (OPEN.isEmpty()) return;
+        for (var e : OPEN.entrySet()) {
+            ServerPlayer p = server.getPlayerList().getPlayer(e.getKey());
+            Open o = e.getValue();
+            if (p == null || p.containerMenu != o.menu) continue;
+            settle(p, o);
+        }
+    }
+
+    private static void settle(ServerPlayer p, Open o) {
+        Map<Key, Integer> c = count(p, o.menu), mine = own(p, o.menu);
+        if (o.lastC != null && o.lastP != null) {
+            java.util.Set<Key> keys = new java.util.HashSet<>(c.keySet());
+            keys.addAll(o.lastC.keySet());
+            for (Key k : keys) {
+                int dc = c.getOrDefault(k, 0) - o.lastC.getOrDefault(k, 0);
+                int dp = mine.getOrDefault(k, 0) - o.lastP.getOrDefault(k, 0);
+                if (dc < 0 && dp > 0) o.delta.merge(k, -Math.min(-dc, dp), Integer::sum);
+                else if (dc > 0 && dp < 0) o.delta.merge(k, Math.min(dc, -dp), Integer::sum);
+            }
+        }
+        o.lastC = c;
+        o.lastP = mine;
+    }
+
+    /** The player's own items: inventory, armour, offhand and what the cursor holds. */
+    private static Map<Key, Integer> own(ServerPlayer player, AbstractContainerMenu menu) {
+        Map<Key, Integer> out = new HashMap<>();
+        var inv = player.getInventory();
+        for (var list : java.util.List.of(inv.items, inv.armor, inv.offhand)) {
+            for (ItemStack st : list) if (!st.isEmpty()) out.merge(new Key(st.copyWithCount(1)), st.getCount(), Integer::sum);
+        }
+        ItemStack carried = menu.getCarried();
+        if (!carried.isEmpty()) out.merge(new Key(carried.copyWithCount(1)), carried.getCount(), Integer::sum);
+        return out;
     }
 
     /** Before the server handles a click of the player in a menu. */
     public static void beforeClick(ServerPlayer player) {
         Open o = OPEN.get(player.getUUID());
-        if (o != null && player.containerMenu == o.menu) o.before = count(player, o.menu);
+        if (o != null && player.containerMenu == o.menu) {
+            settle(player, o); // what mod packets moved since the last look, before this click
+            o.before = count(player, o.menu);
+        }
     }
 
     /** After the click: what changed in the container's slots is the player's doing. */
@@ -99,12 +152,16 @@ public final class Containers {
             if (!now.containsKey(e.getKey())) o.delta.merge(e.getKey(), -e.getValue(), Integer::sum);
         }
         o.before = null;
+        // the click is counted: the next look starts from here
+        o.lastC = now;
+        o.lastP = own(player, o.menu);
     }
 
     public static void closed(ServerPlayer player, AbstractContainerMenu menu) {
         Open o = OPEN.get(player.getUUID());
         Db db = Chronik.db();
         if (o == null || (menu != null && o.menu != menu)) return;
+        settle(player, o);
         OPEN.remove(player.getUUID());
         if (db == null) return;
         String actor = ((Owned) player).chronik$actor();
@@ -130,6 +187,11 @@ public final class Containers {
 
     /** The block behind a menu: a block entity among its slots, else the block clicked as it opened. */
     private static BlockPos blockOf(ServerPlayer player, AbstractContainerMenu menu) {
+        for (Slot s : menu.slots) {
+            // the ender chest's items are the player's own and live in the player file: a
+            // rollback at the block could not reach them, so they are not logged there
+            if (s.container instanceof net.minecraft.world.inventory.PlayerEnderChestContainer) return null;
+        }
         for (Slot s : menu.slots) {
             if (own(player, s)) continue;
             if (s.container instanceof BlockEntity be && be.getLevel() == player.level()) return be.getBlockPos();

@@ -101,6 +101,7 @@ public final class Chronik {
     private static void onTick(ServerTickEvent.Pre e) {
         Ctx.clear();
         Rollbacks.tick();
+        if (server != null) de.kronwerke.chronik.track.Containers.tick(server);
         de.kronwerke.chronik.track.Events.flushPickups(false);
         long now = System.currentTimeMillis();
         if (db != null && now >= nextPurge) {

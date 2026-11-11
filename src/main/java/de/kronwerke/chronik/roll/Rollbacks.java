@@ -196,7 +196,14 @@ public final class Rollbacks {
                 BlockPos pos = new BlockPos(r.x(), r.y(), r.z());
                 if (!j.touched.remove(pos)) continue;
                 ServerLevel level = server.getLevel(ResourceKey.create(Registries.DIMENSION, ResourceLocation.parse(r.world())));
-                if (level != null && level.isLoaded(pos)) level.blockUpdated(pos, level.getBlockState(pos).getBlock());
+                if (level == null || !level.isLoaded(pos)) continue;
+                // set with UPDATE_KNOWN_SHAPE: now the block and its neighbours take the shape
+                // that fits (a fence put back connects again, one taken away lets go)
+                BlockState st = level.getBlockState(pos);
+                BlockState shaped = Block.updateFromNeighbourShapes(st, level, pos);
+                if (shaped != st) level.setBlock(pos, shaped, Block.UPDATE_CLIENTS | Block.UPDATE_SUPPRESS_DROPS);
+                shaped.updateNeighbourShapes(level, pos, Block.UPDATE_CLIENTS | Block.UPDATE_SUPPRESS_DROPS);
+                level.blockUpdated(pos, shaped.getBlock());
             }
         }
         j.report.accept((stopped ? "Abgebrochen nach " : "Fertig: ") + j.changed + " Änderungen " + (j.restore ? "wiederhergestellt" : "zurückgesetzt")
@@ -216,8 +223,12 @@ public final class Rollbacks {
         BlockState expected = state(level, restore ? r.a() : r.b());
         if (target == null) return SKIPPED;
         BlockState now = level.getBlockState(pos);
-        // only what the entry left behind is changed: newer work in the same place stays
-        if (expected != null && now != expected && !(now.isAir() && expected.isAir())) return NEWER;
+        // only what the entry left behind is changed: newer work in the same place stays. The
+        // block counts, not its state: fences, panes and wire change shape with their
+        // neighbours, crops grow, furnaces light up, doors open, and none of that is newer
+        // work. Where air was left, water or lava that flowed in since is no work either
+        // (review R2-04).
+        if (expected != null && !sameWork(now, expected)) return NEWER;
         BlockEntity old = level.getBlockEntity(pos);
         if (old != null && !restore && data == null && r.action() == Entry.PLACE) {
             // a block entity this rollback removes: kept in the entry for a restore
@@ -245,6 +256,11 @@ public final class Rollbacks {
             }
         }
         return DONE;
+    }
+
+    static boolean sameWork(BlockState now, BlockState expected) {
+        if (expected.isAir()) return now.isAir() || (!now.getFluidState().isEmpty() && now.canBeReplaced());
+        return now.getBlock() == expected.getBlock();
     }
 
     /** Items: a rollback puts taken items back and takes put items out again; a restore the other way round. */

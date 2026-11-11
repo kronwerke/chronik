@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.2.0
+
+- A rollback compares the block, not its state: a fence, pane or wire that changed shape, a crop that grew, a furnace that lit up or a door that opened is no longer "newer work" and is rolled back. Where the entry left air, water or lava that flowed in since is replaced too. After the job every touched block and its neighbours take their shapes again, so a fence put back connects. (R2-04)
+- Containers: items moved by a mod's own buttons (transfer and sort buttons, inventory sorting mods) are logged as well. Every tick the container and the player's own items are compared; what the container lost and the player gained, or the other way round, is the player's. A furnace or a pipe still changes only one side and is not put on the player. Ender chests are not logged at the block any more, since their items live in the player file. (R2-16)
+
 ## 1.1.0
 
 - Containers: only the player's own clicks count. Before and after every click (and every recipe placed by a recipe book or JEI) the container's slots are counted; a furnace smelting or a pipe filling the chest while the menu is open is no longer put on the player. The entry sits at the block entity behind the menu, or at the block clicked in the same moment the menu opened. A menu from an item (a backpack opened by key) is not logged.
