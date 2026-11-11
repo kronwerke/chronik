@@ -58,6 +58,7 @@ public final class Api {
             }
         }
         if (port <= 0 || token.isBlank()) return;
+        final String key = token;
         try {
             http = HttpServer.create(new InetSocketAddress(InetAddress.getLoopbackAddress(), port), 16);
             http.setExecutor(Executors.newFixedThreadPool(2, r -> {
@@ -65,8 +66,8 @@ public final class Api {
                 t.setDaemon(true);
                 return t;
             }));
-            http.createContext("/status", ex -> guarded(ex, token, Api::status));
-            http.createContext("/lookup", ex -> guarded(ex, token, Api::lookup));
+            http.createContext("/status", ex -> guarded(ex, key, Api::status));
+            http.createContext("/lookup", ex -> guarded(ex, key, Api::lookup));
             http.start();
             Chronik.LOG.info("Chronik API on 127.0.0.1:{}", port);
         } catch (IOException e) {
