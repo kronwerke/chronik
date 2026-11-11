@@ -9,6 +9,7 @@
 - `log.skipWorlds`: worlds that are not logged at all. `log.quietBlocks`: natural ground a quarry, miner or drill digs is not logged (stone, ores, dirt, gravel, sand and the like); what players break and everything else machines break still is. `log.pickupMergeSeconds` (10): pickups of one item by one player in that time are one entry.
 - Direct messages (`/msg`, `/tell`, `/w`, `/r`, `/teammsg` and the like, `log.privateCommands`) keep the command and the receiver, never the text.
 - Test players of Kronwerke Core's load test are not logged.
+- `/chronik snapshot` (operator level 4, the launcher's backup uses it) writes a consistent copy of the log next to the live one with `VACUUM INTO`, then `chronik-snapshot.done`.
 - Messages say what was left alone and why, that kills, drops and pickups cannot be rolled back, and that `/co undo` only works until the next restart.
 
 ## 1.0.0
