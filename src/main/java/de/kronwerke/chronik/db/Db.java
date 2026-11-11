@@ -77,8 +77,22 @@ public final class Db {
 
     public void open() throws SQLException, IOException {
         Files.createDirectories(file.getParent());
+        boolean fresh = !Files.exists(file);
         write = connect();
         try (Statement s = write.createStatement()) {
+            // freed pages go back to the file system bit by bit after each purge; a file of
+            // Chronik 1.0.0 is converted once while it is still small
+            if (fresh) {
+                s.execute("PRAGMA auto_vacuum=INCREMENTAL");
+            } else if (Files.size(file) < 256L * 1024 * 1024) {
+                try (ResultSet r = s.executeQuery("PRAGMA auto_vacuum")) {
+                    if (r.next() && r.getInt(1) == 0) {
+                        s.execute("PRAGMA auto_vacuum=INCREMENTAL");
+                        s.execute("VACUUM");
+                        LOG.info("Chronik converted {} to incremental vacuum", file);
+                    }
+                }
+            }
             s.execute("PRAGMA journal_mode=WAL");
             s.execute("PRAGMA synchronous=NORMAL");
             s.execute("""
@@ -162,6 +176,7 @@ public final class Db {
 
     /** From the server thread: never blocks. */
     public void add(Entry e) {
+        if (de.kronwerke.chronik.track.Track.skipped(e.world) || de.kronwerke.chronik.track.Actors.bot(e.actor)) return;
         if (!running || !queue.offer(e)) dropped.incrementAndGet();
     }
 
@@ -217,9 +232,11 @@ public final class Db {
         }
     }
 
+    /** Runs the tasks queued so far; a task that queues its next step runs it after the next batch of entries. */
     private void runTasks() {
+        int n = tasks.size();
         Runnable t;
-        while ((t = tasks.poll()) != null) {
+        while (n-- > 0 && (t = tasks.poll()) != null) {
             try {
                 t.run();
             } catch (RuntimeException e) {
@@ -324,7 +341,7 @@ public final class Db {
         }
     }
 
-    static byte[] pack(CompoundTag tag) throws IOException {
+    public static byte[] pack(CompoundTag tag) throws IOException {
         ByteArrayOutputStream out = new ByteArrayOutputStream();
         NbtIo.writeCompressed(tag, out);
         return out.toByteArray();
@@ -393,27 +410,68 @@ public final class Db {
         });
     }
 
-    /** Deletes everything older than the cutoff, in small steps so the writer keeps up. */
+    /** Writes a block entity a rollback is about to remove into its row, so a restore brings it back with its contents. */
+    public void setData(long id, byte[] data) {
+        tasks.add(() -> {
+            try (PreparedStatement p = write.prepareStatement("UPDATE actions SET data = ? WHERE id = ?")) {
+                p.setBytes(1, data);
+                p.setLong(2, id);
+                p.executeUpdate();
+            } catch (SQLException e) {
+                LOG.error("Chronik could not keep the block entity of row {}", id, e);
+            }
+        });
+    }
+
+    /**
+     * Deletes everything older than the cutoff, 5,000 rows per step. Each step is its own task,
+     * so the writer stores a batch of new entries between two steps and the queue does not fill
+     * up while millions of old rows go. Afterwards the freed pages are given back to the file
+     * system, again in steps.
+     */
     public CompletableFuture<Long> purge(long olderThan) {
         CompletableFuture<Long> done = new CompletableFuture<>();
-        tasks.add(() -> {
-            long total = 0;
-            try (PreparedStatement a = write.prepareStatement("DELETE FROM actions WHERE id IN (SELECT id FROM actions WHERE t < ? LIMIT 20000)");
-                 PreparedStatement m = write.prepareStatement("DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE t < ? LIMIT 20000)")) {
-                for (PreparedStatement p : new PreparedStatement[]{a, m}) {
-                    int n;
-                    do {
-                        p.setLong(1, olderThan);
-                        n = p.executeUpdate();
-                        total += n;
-                    } while (n > 0);
+        long[] total = {0};
+        String[] sql = {"DELETE FROM actions WHERE id IN (SELECT id FROM actions WHERE t < ? LIMIT 5000)",
+                "DELETE FROM messages WHERE id IN (SELECT id FROM messages WHERE t < ? LIMIT 5000)"};
+        Runnable[] step = new Runnable[1];
+        int[] table = {0};
+        step[0] = () -> {
+            try (PreparedStatement p = write.prepareStatement(sql[table[0]])) {
+                p.setLong(1, olderThan);
+                int n = p.executeUpdate();
+                total[0] += n;
+                if (n == 0) table[0]++;
+                if (table[0] < sql.length) {
+                    tasks.add(step[0]);
+                } else {
+                    done.complete(total[0]);
+                    if (total[0] > 0) tasks.add(this::vacuumStep);
                 }
-                done.complete(total);
             } catch (SQLException e) {
                 LOG.error("Chronik purge failed", e);
                 done.completeExceptionally(e);
             }
-        });
+        };
+        tasks.add(step[0]);
         return done;
+    }
+
+    /** Gives up to 2,000 free pages back to the file system; again until none are left. */
+    private void vacuumStep() {
+        try (Statement s = write.createStatement()) {
+            try (ResultSet r = s.executeQuery("PRAGMA auto_vacuum")) {
+                if (!r.next() || r.getInt(1) != 2) return; // a file made before 1.1.0 has no incremental vacuum
+            }
+            int free;
+            try (ResultSet r = s.executeQuery("PRAGMA freelist_count")) {
+                free = r.next() ? r.getInt(1) : 0;
+            }
+            if (free <= 0) return;
+            s.execute("PRAGMA incremental_vacuum(2000)");
+            if (free > 2000) tasks.add(this::vacuumStep);
+        } catch (SQLException e) {
+            LOG.warn("Chronik could not shrink its file: {}", e.toString());
+        }
     }
 }

@@ -66,6 +66,7 @@ public final class Events {
      * and experience are left alone so they do not all carry an owner.
      */
     private static void onJoinLevel(EntityJoinLevelEvent e) {
+        if (e.getEntity() instanceof ServerPlayer sp) Actors.joined(sp); // a load test bot may skip the login event
         if (e.loadedFromDisk() || e.getLevel().isClientSide()) return;
         Entity entity = e.getEntity();
         if (entity instanceof Player || entity instanceof Mob || entity instanceof ItemEntity || entity instanceof ExperienceOrb) return;
@@ -106,8 +107,61 @@ public final class Events {
         if (e.getPlayer() instanceof ServerPlayer p && !(p instanceof FakePlayer)) {
             ItemStack orig = e.getOriginalStack();
             int took = orig.getCount() - e.getCurrentStack().getCount();
-            if (took > 0) item(p, Entry.PICKUP, orig.copyWithCount(took), e.getItemEntity().blockPosition());
+            if (took > 0) pickup(p, orig.copyWithCount(took), e.getItemEntity().blockPosition());
         }
+    }
+
+    /** Pickups waiting to be merged: per player and kind of item, the first place and the count so far. */
+    private static final class Pending {
+        final ServerPlayer player;
+        final ItemStack one;
+        final BlockPos pos;
+        final long until;
+        int count;
+
+        Pending(ServerPlayer player, ItemStack one, BlockPos pos, long until) {
+            this.player = player;
+            this.one = one;
+            this.pos = pos;
+            this.until = until;
+        }
+    }
+
+    private static final java.util.Map<String, Pending> PICKUPS = new java.util.LinkedHashMap<>();
+
+    /** A magnet or a mob farm picks up hundreds of stacks a minute: one entry per player and item over a few seconds. */
+    private static void pickup(ServerPlayer p, ItemStack stack, BlockPos pos) {
+        int secs = ChronikConfig.PICKUP_MERGE_SECONDS.get();
+        if (secs <= 0) {
+            item(p, Entry.PICKUP, stack, pos);
+            return;
+        }
+        String key = p.getUUID() + "|" + net.minecraft.core.registries.BuiltInRegistries.ITEM.getKey(stack.getItem()) + "|" + ItemStack.hashItemAndComponents(stack);
+        Pending pend = PICKUPS.get(key);
+        if (pend == null || !ItemStack.isSameItemSameComponents(pend.one, stack)) {
+            if (pend != null) flush(pend);
+            pend = new Pending(p, stack.copyWithCount(1), pos, System.currentTimeMillis() + secs * 1000L);
+            PICKUPS.put(key, pend);
+        }
+        pend.count += stack.getCount();
+    }
+
+    /** Every tick: merged pickups whose time is up are written. */
+    public static void flushPickups(boolean all) {
+        if (PICKUPS.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        var it = PICKUPS.values().iterator();
+        while (it.hasNext()) {
+            Pending pend = it.next();
+            if (all || now >= pend.until || pend.player.hasDisconnected()) {
+                flush(pend);
+                it.remove();
+            }
+        }
+    }
+
+    private static void flush(Pending pend) {
+        item(pend.player, Entry.PICKUP, pend.one.copyWithCount(pend.count), pend.pos);
     }
 
     private static void item(ServerPlayer p, int action, ItemStack stack, BlockPos pos) {
@@ -132,12 +186,26 @@ public final class Events {
     private static void onCommand(CommandEvent e) {
         if (!ChronikConfig.LOG_COMMANDS.get()) return;
         if (e.getParseResults().getContext().getSource().getEntity() instanceof ServerPlayer p && !(p instanceof FakePlayer)) {
-            message(p, Entry.COMMAND, "/" + e.getParseResults().getReader().getString());
+            message(p, Entry.COMMAND, "/" + privateCut(e.getParseResults().getReader().getString()));
         }
+    }
+
+    /** A direct message keeps its command and receiver; its text is nobody's business (log.privateCommands). */
+    static String privateCut(String command) {
+        String c = command.startsWith("/") ? command.substring(1) : command;
+        String[] parts = c.split(" ", 3);
+        String name = parts[0].toLowerCase(java.util.Locale.ROOT);
+        int colon = name.indexOf(':');
+        if (colon >= 0) name = name.substring(colon + 1); // minecraft:msg
+        if (!ChronikConfig.PRIVATE_COMMANDS.get().contains(name)) return c;
+        boolean hasReceiver = !name.equals("r") && !name.equals("reply") && !name.equals("teammsg") && !name.equals("tm");
+        return parts[0] + (hasReceiver && parts.length > 1 ? " " + parts[1] : "") + " (Text nicht gespeichert)";
     }
 
     private static void onLogin(PlayerEvent.PlayerLoggedInEvent e) {
         if (!(e.getEntity() instanceof ServerPlayer p)) return;
+        Actors.joined(p);
+        if (Actors.bot(((Owned) p).chronik$actor())) return;
         Db db = Chronik.db();
         if (db != null) db.name(((Owned) p).chronik$actor(), p.getGameProfile().getName());
         if (ChronikConfig.LOG_SESSIONS.get()) message(p, Entry.JOIN, "");
@@ -148,6 +216,7 @@ public final class Events {
         Containers.left(p);
         Inspector.left(p);
         if (ChronikConfig.LOG_SESSIONS.get()) message(p, Entry.LEAVE, "");
+        Actors.left(p);
     }
 
     private static void message(ServerPlayer p, int kind, String text) {

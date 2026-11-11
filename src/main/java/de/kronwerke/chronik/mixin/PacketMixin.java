@@ -6,11 +6,13 @@ import org.spongepowered.asm.mixin.Shadow;
 import com.llamalad7.mixinextras.injector.wrapmethod.WrapMethod;
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 
+import de.kronwerke.chronik.track.Containers;
 import de.kronwerke.chronik.track.Ctx;
 import de.kronwerke.chronik.track.Inspector;
 import de.kronwerke.chronik.track.Owned;
 import net.minecraft.network.protocol.game.ServerboundContainerClickPacket;
 import net.minecraft.network.protocol.game.ServerboundInteractPacket;
+import net.minecraft.network.protocol.game.ServerboundPlaceRecipePacket;
 import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemOnPacket;
 import net.minecraft.network.protocol.game.ServerboundUseItemPacket;
@@ -63,8 +65,33 @@ public abstract class PacketMixin {
         chronik$run(() -> original.call(packet));
     }
 
+    /** A click in a menu: what it changes in the container is the player's doing (Containers). */
     @WrapMethod(method = "handleContainerClick")
     private void chronik$click(ServerboundContainerClickPacket packet, Operation<Void> original) {
-        chronik$run(() -> original.call(packet));
+        if (!Ctx.onServerThread()) {
+            original.call(packet);
+            return;
+        }
+        Containers.beforeClick(this.player);
+        try {
+            chronik$run(() -> original.call(packet));
+        } finally {
+            Containers.afterClick(this.player);
+        }
+    }
+
+    /** A recipe placed into a crafting menu by a recipe book or JEI moves items like clicks do. */
+    @WrapMethod(method = "handlePlaceRecipe")
+    private void chronik$placeRecipe(ServerboundPlaceRecipePacket packet, Operation<Void> original) {
+        if (!Ctx.onServerThread()) {
+            original.call(packet);
+            return;
+        }
+        Containers.beforeClick(this.player);
+        try {
+            chronik$run(() -> original.call(packet));
+        } finally {
+            Containers.afterClick(this.player);
+        }
     }
 }

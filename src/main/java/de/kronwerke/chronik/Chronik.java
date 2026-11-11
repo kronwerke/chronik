@@ -88,6 +88,7 @@ public final class Chronik {
     private static void onStopped(ServerStoppedEvent e) {
         Api.stop();
         Rollbacks.stopAll();
+        de.kronwerke.chronik.track.Events.flushPickups(true);
         if (db != null) {
             db.close();
             LOG.info("Chronik wrote {} entries this run, dropped {}", db.written(), db.dropped());
@@ -100,6 +101,7 @@ public final class Chronik {
     private static void onTick(ServerTickEvent.Pre e) {
         Ctx.clear();
         Rollbacks.tick();
+        de.kronwerke.chronik.track.Events.flushPickups(false);
         long now = System.currentTimeMillis();
         if (db != null && now >= nextPurge) {
             nextPurge = now + TimeUnit.DAYS.toMillis(1);

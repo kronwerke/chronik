@@ -77,7 +77,8 @@ public final class ChronikCommand {
                 {"/co page 2", "nächste Seite"},
                 {"/co rb u:Name t:1h r:20", "zurücksetzen (Zeit und Spieler oder Radius nötig)"},
                 {"/co rs ...", "wiederherstellen"},
-                {"/co undo", "letztes Zurücksetzen oder Wiederherstellen rückgängig"},
+                {"/co rb confirm", "bestätigt das Zurücksetzen, das /co rb gerade gezeigt hat"},
+                {"/co undo", "letztes Zurücksetzen oder Wiederherstellen rückgängig, bis zum nächsten Neustart"},
                 {"/co status", "Log-Größe und Warteschlange"},
         };
         for (String[] l : lines) {
@@ -181,7 +182,17 @@ public final class ChronikCommand {
         Db db = db(c);
         if (db == null) return 0;
         CommandSourceStack s = c.getSource();
-        Params p = Params.parse(StringArgumentType.getString(c, "params"), db, Track.world(s.getLevel()), BlockPos.containing(s.getPosition()));
+        String who = s.getTextName();
+        String raw = StringArgumentType.getString(c, "params").trim();
+        java.util.function.Consumer<String> report = msg -> s.sendSystemMessage(Component.literal(msg).withStyle(ChatFormatting.GOLD));
+        if (raw.equalsIgnoreCase("confirm")) {
+            if (!Rollbacks.confirm(who, restore, report)) {
+                s.sendFailure(Component.literal("Nichts zu bestätigen: erst /co " + (restore ? "rs" : "rb") + " mit Zeit und Spieler oder Radius, dann innerhalb einer Minute confirm."));
+                return 0;
+            }
+            return 1;
+        }
+        Params p = Params.parse(raw, db, Track.world(s.getLevel()), BlockPos.containing(s.getPosition()));
         if (p.error != null) {
             s.sendFailure(Component.literal(p.error));
             return 0;
@@ -191,17 +202,26 @@ public final class ChronikCommand {
             return 0;
         }
         Filter f = p.filter;
+        if (!p.hasUser && f.radius < 0) {
+            s.sendFailure(Component.literal("Eine ganze Welt (r:#world, r:#global) nur mit einem Spieler (u:)."));
+            return 0;
+        }
         if (f.actions.isEmpty()) f.actions.addAll(List.of(0, 1, 2, 3, 4));
         f.rolled = restore;
         f.newestFirst = !restore;
-        f.limit = 2_000_000;
-        String who = s.getTextName();
+        int max = ChronikConfig.MAX_ROLLBACK_ROWS.get();
+        f.limit = max + 1;
         db.lookup(f).whenComplete((rows, err) -> s.getServer().execute(() -> {
             if (err != null) {
                 s.sendFailure(Component.literal("Suche fehlgeschlagen: " + err.getMessage()));
                 return;
             }
-            Rollbacks.start(rows, restore, who, msg -> s.sendSystemMessage(Component.literal(msg).withStyle(ChatFormatting.GOLD)));
+            if (rows.size() > max) {
+                s.sendFailure(Component.literal("Mehr als " + max + " Änderungen auf einmal. Enger fassen: Spieler, kürzere Zeit oder kleinerer Radius."));
+                return;
+            }
+            report.accept(Rollbacks.plan(rows, restore, who));
+            Rollbacks.planned(who);
         }));
         return 1;
     }

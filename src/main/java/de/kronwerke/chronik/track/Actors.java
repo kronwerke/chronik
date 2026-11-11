@@ -22,6 +22,21 @@ public final class Actors {
         return ((Owned) e).chronik$actor();
     }
 
+    /** Test players of a load test (Kronwerke Core's LoadBot): what they do is not logged. */
+    private static final java.util.Set<String> BOTS = ConcurrentHashMap.newKeySet();
+
+    public static void joined(net.minecraft.server.level.ServerPlayer p) {
+        if (p.getClass().getSimpleName().equals("LoadBot")) BOTS.add(p.getUUID().toString());
+    }
+
+    public static void left(net.minecraft.server.level.ServerPlayer p) {
+        BOTS.remove(p.getUUID().toString());
+    }
+
+    public static boolean bot(String actorKey) {
+        return actorKey != null && !BOTS.isEmpty() && BOTS.contains(actorKey);
+    }
+
     /** Whether the key is a person (a UUID), the only kind of actor that can own things. */
     public static boolean isPlayer(String actorKey) {
         return actorKey != null && !actorKey.isEmpty() && actorKey.charAt(0) != '#';

@@ -40,9 +40,10 @@ field read. Rollbacks and restores run a few milliseconds per tick for as many t
 | `/co near [radius]` | what happened around you |
 | `/co l <params>` | look up |
 | `/co page <n>` | next page |
-| `/co rb <params>` | roll back (needs `t:` and `u:` or `r:`) |
-| `/co rs <params>` | restore |
-| `/co undo` | undo the last rollback or restore |
+| `/co rb <params>` | shows what a rollback would change (needs `t:` and `u:` or `r:`; a whole world only with `u:`) |
+| `/co rb confirm` | runs it, within a minute |
+| `/co rs <params>`, `/co rs confirm` | the same for a restore |
+| `/co undo` | undo the last rollback or restore (until the next restart) |
 | `/co purge <days>` | delete older entries |
 | `/co status` | size, written, queued, dropped |
 

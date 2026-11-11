@@ -1,5 +1,16 @@
 # Changelog
 
+## 1.1.0
+
+- Containers: only the player's own clicks count. Before and after every click (and every recipe placed by a recipe book or JEI) the container's slots are counted; a furnace smelting or a pipe filling the chest while the menu is open is no longer put on the player. The entry sits at the block entity behind the menu, or at the block clicked in the same moment the menu opened. A menu from an item (a backpack opened by key) is not logged.
+- Rollbacks and restores show what they would do first (how many changes, which world and area) and run only after `/co rb confirm` (or `/co rs confirm`) within a minute. A block is only changed while it still is what the entry left behind; newer work in the same place stays and is counted. A whole world (`r:#world`, `r:#global`) needs a player. At most `rollback.maxRows` (200,000) changes at once.
+- A block entity a rollback removes (a chest someone placed) is kept in its entry, so a restore brings it back with its contents. Neighbours are updated once a job is through, so doors, beds and multiblocks come back whole.
+- The daily purge deletes 5,000 rows per step and lets the writer store new entries in between; afterwards the file shrinks (incremental vacuum; a file of 1.0.0 is converted once at start while it is under 256 MB).
+- `log.skipWorlds`: worlds that are not logged at all. `log.quietBlocks`: natural ground a quarry, miner or drill digs is not logged (stone, ores, dirt, gravel, sand and the like); what players break and everything else machines break still is. `log.pickupMergeSeconds` (10): pickups of one item by one player in that time are one entry.
+- Direct messages (`/msg`, `/tell`, `/w`, `/r`, `/teammsg` and the like, `log.privateCommands`) keep the command and the receiver, never the text.
+- Test players of Kronwerke Core's load test are not logged.
+- Messages say what was left alone and why, that kills, drops and pickups cannot be rolled back, and that `/co undo` only works until the next restart.
+
 ## 1.0.0
 
 First release.

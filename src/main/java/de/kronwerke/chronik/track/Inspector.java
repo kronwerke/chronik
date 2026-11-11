@@ -32,10 +32,10 @@ public final class Inspector {
         LAST_USE.put(p.getUUID(), new long[]{pos.asLong(), p.serverLevel().getGameTime()});
     }
 
-    /** The block the player right clicked within the last two seconds, the container they opened. */
-    public static BlockPos recentUse(ServerPlayer p) {
+    /** The block the player right clicked within the last few ticks, the container they opened. */
+    public static BlockPos recentUse(ServerPlayer p, int ticks) {
         long[] u = LAST_USE.get(p.getUUID());
-        if (u == null || p.serverLevel().getGameTime() - u[1] > 40) return null;
+        if (u == null || p.serverLevel().getGameTime() - u[1] > ticks) return null;
         return BlockPos.of(u[0]);
     }
 
