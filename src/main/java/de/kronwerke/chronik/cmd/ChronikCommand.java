@@ -66,7 +66,8 @@ public final class ChronikCommand {
                 .then(Commands.literal("undo").requires(s -> s.hasPermission(ChronikConfig.ROLLBACK_LEVEL.get())).executes(ChronikCommand::undo))
                 .then(Commands.literal("purge").requires(s -> s.hasPermission(4))
                         .then(Commands.argument("days", IntegerArgumentType.integer(1)).executes(ChronikCommand::purge)))
-                .then(Commands.literal("status").executes(ChronikCommand::status));
+                .then(Commands.literal("status").executes(ChronikCommand::status))
+                .then(Commands.literal("snapshot").requires(s -> s.hasPermission(4)).executes(ChronikCommand::snapshot));
     }
 
     private static int help(CommandContext<CommandSourceStack> c) {
@@ -242,6 +243,16 @@ public final class ChronikCommand {
         CommandSourceStack s = c.getSource();
         db.purge(System.currentTimeMillis() - TimeUnit.DAYS.toMillis(days)).thenAccept(n -> s.getServer().execute(() ->
                 s.sendSystemMessage(Component.literal(n + " Einträge älter als " + days + " Tage gelöscht.").withStyle(ChatFormatting.GOLD))));
+        return 1;
+    }
+
+    /** For the launcher's backup: a consistent copy of the log next to the live one. */
+    private static int snapshot(CommandContext<CommandSourceStack> c) {
+        Db db = db(c);
+        if (db == null) return 0;
+        java.nio.file.Path dir = c.getSource().getServer().getWorldPath(net.minecraft.world.level.storage.LevelResource.ROOT);
+        db.snapshot(dir.resolve("chronik-snapshot.db"), dir.resolve("chronik-snapshot.done"));
+        c.getSource().sendSystemMessage(Component.literal("OK snapshot requested"));
         return 1;
     }
 

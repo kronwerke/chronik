@@ -410,6 +410,26 @@ public final class Db {
         });
     }
 
+    /**
+     * A consistent copy of the whole log for a backup: VACUUM INTO on the writer thread, so no
+     * entry is half written, then an empty marker file says it is done. The launcher waits for
+     * the marker and zips the copy instead of the live file.
+     */
+    public void snapshot(Path target, Path done) {
+        tasks.add(() -> {
+            try {
+                Files.deleteIfExists(target);
+                try (PreparedStatement p = write.prepareStatement("VACUUM INTO ?")) {
+                    p.setString(1, target.toAbsolutePath().toString());
+                    p.execute();
+                }
+                Files.writeString(done, "");
+            } catch (SQLException | IOException e) {
+                LOG.error("Chronik could not write a snapshot to {}", target, e);
+            }
+        });
+    }
+
     /** Writes a block entity a rollback is about to remove into its row, so a restore brings it back with its contents. */
     public void setData(long id, byte[] data) {
         tasks.add(() -> {
